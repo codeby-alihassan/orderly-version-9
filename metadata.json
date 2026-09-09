@@ -1,0 +1,6 @@
+{
+  "name": "Orderly POS",
+  "description": "Professional retail POS and shop management software with inventory, purchases, credit ledger, cash sessions, and analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
