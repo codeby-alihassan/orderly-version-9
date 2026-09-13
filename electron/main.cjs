@@ -1,63 +1,110 @@
-const { app, BrowserWindow } = require("electron");
-const { spawn } = require("child_process");
+const { app, BrowserWindow, dialog } = require("electron");
 const path = require("path");
+const http = require("http");
 
-let serverProcess;
+const PORT = 3000;
 let mainWindow;
 
 function startServer() {
-  const serverPath = path.join(__dirname, "..", "dist", "server.cjs");
+  process.env.NODE_ENV = "production";
 
-  serverProcess = spawn(process.execPath, [serverPath], {
-    cwd: path.join(__dirname, ".."),
-    env: {
-      ...process.env,
-      NODE_ENV: "production",
-      ELECTRON_RUN_AS_NODE: "1"
-    },
-    stdio: "inherit"
-  });
+  // Database ko Windows ke writable AppData folder mein rakho
+  process.env.DATA_DIR = path.join(app.getPath("userData"), "data");
 
-  serverProcess.on("error", (error) => {
-    console.error("Failed to start Orderly server:", error);
+  // Production frontend ka exact path
+  process.env.DIST_PATH = path.join(app.getAppPath(), "dist");
+
+  const serverPath = path.join(
+    app.getAppPath(),
+    "dist",
+    "server.cjs"
+  );
+
+  require(serverPath);
+}
+
+function waitForServer(retries = 60) {
+  return new Promise((resolve, reject) => {
+    const attempt = () => {
+      const req = http.get(
+        `http://127.0.0.1:${PORT}/api/health`,
+        (res) => {
+          res.resume();
+
+          if (res.statusCode === 200) {
+            resolve();
+          } else {
+            retry();
+          }
+        }
+      );
+
+      req.on("error", retry);
+
+      req.setTimeout(1000, () => {
+        req.destroy();
+        retry();
+      });
+    };
+
+    const retry = () => {
+      if (retries-- <= 0) {
+        reject(
+          new Error("Orderly POS server did not start.")
+        );
+      } else {
+        setTimeout(attempt, 500);
+      }
+    };
+
+    attempt();
   });
 }
 
-function createWindow() {
+async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 1000,
     minHeight: 700,
+
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false
     }
   });
 
-  mainWindow.loadURL("http://localhost:3000");
+  await waitForServer();
+
+  await mainWindow.loadURL(
+    `http://127.0.0.1:${PORT}`
+  );
 }
 
-app.whenReady().then(() => {
-  startServer();
+app.whenReady().then(async () => {
+  try {
+    startServer();
+    await createWindow();
+  } catch (error) {
+    console.error(error);
 
-  setTimeout(() => {
-    createWindow();
-  }, 1500);
+    dialog.showErrorBox(
+      "Orderly POS",
+      `Application failed to start.\n\n${error.message}`
+    );
+
+    app.quit();
+  }
 });
 
 app.on("window-all-closed", () => {
-  if (serverProcess) {
-    serverProcess.kill();
-  }
-
   if (process.platform !== "darwin") {
     app.quit();
   }
 });
 
-app.on("before-quit", () => {
-  if (serverProcess) {
-    serverProcess.kill();
+app.on("activate", async () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    await createWindow();
   }
 });
